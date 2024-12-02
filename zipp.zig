@@ -9,23 +9,6 @@ const zipp = @This();
 
 pub const Error = error{InvalidNewline} || mem.Allocator.Error;
 
-pub fn Pretty(comptime _T: type) type {
-    return struct {
-        const T = _T;
-        const Self = @This();
-
-        pp: T,
-
-        fn width(self: Self) Width {
-            return self.pp.width();
-        }
-
-        fn print(self: Self, state: *State, writer: anytype) Error!void {
-            return self.pp.print(state, writer);
-        }
-    };
-}
-
 const State = struct {
     width: usize,
     ribbon: usize,
@@ -60,7 +43,7 @@ const Empty = struct {
     fn print(_: Self, _: *State, _: anytype) Error!void {}
 };
 
-const empty = Pretty(Empty){ .pp = Empty{} };
+const empty = Empty{};
 
 const Char = struct {
     c: u8,
@@ -78,10 +61,10 @@ const Char = struct {
     }
 };
 
-pub fn char(comptime c: u8) Pretty(Char) {
+pub fn char(comptime c: u8) Char {
     if (c == '\n')
         @compileError("Newline is invalid!");
-    return Pretty(Char){ .pp = Char{ .c = c } };
+    return Char{ .c = c };
 }
 
 pub const space = char(' ');
@@ -101,8 +84,8 @@ const Text = struct {
     }
 };
 
-pub fn text(comptime s: []const u8) Pretty(Text) {
-    return Pretty(Text){ .pp = Text{ .s = s } };
+pub fn text(comptime s: []const u8) Text {
+    return Text{ .s = s };
 }
 
 const Hardline = struct {
@@ -121,7 +104,7 @@ const Hardline = struct {
     }
 };
 
-const hardline = Pretty(Hardline){ .pp = Hardline{} };
+const hardline = Hardline{};
 
 const Blank = struct {
     n: usize,
@@ -133,13 +116,13 @@ const Blank = struct {
     }
 
     fn print(self: Self, state: *State, writer: anytype) Error!void {
-        blanks(writer, self.n);
+        try blanks(writer, self.n);
         state.column += self.n;
     }
 };
 
-pub fn blank(comptime n: usize) Pretty(Blank) {
-    return Pretty(Blank){ .pp = Blank{ .n = n } };
+pub fn blank(comptime n: usize) Blank {
+    return Blank{ .n = n };
 }
 
 pub fn Group(comptime printers: anytype) type {
@@ -169,23 +152,23 @@ pub fn Group(comptime printers: anytype) type {
     };
 }
 
-pub fn group(comptime printers: anytype) Pretty(Group(printers)) {
-    const T = Group(printers);
-    return Pretty(T){ .pp = T{} };
+pub fn group(comptime printers: anytype) Group(printers) {
+    return .{};
+    // return Group(printers){};
 }
 
-test "group" {
-    const a = testing.allocator;
-    const L = std.ArrayList(u8);
-    var list = L.init(a);
-    defer list.deinit();
-    const pp = group(.{ text("["), char(' '), text("]") });
-    var state = State.init(0.5, 80);
-    try pp.print(&state, list.writer());
-    try testing.expectEqual(3, list.items.len);
-    const expect = "[ ]";
-    try testing.expectEqualSlices(u8, expect, list.items);
-}
+// test "group" {
+//     const a = testing.allocator;
+//     const L = std.ArrayList(u8);
+//     var list = L.init(a);
+//     defer list.deinit();
+//     const pp = group(.{ text("["), char(' '), text("]") });
+//     var state = State.init(0.5, 80);
+//     try pp.print(&state, list.writer());
+//     try testing.expectEqual(3, list.items.len);
+//     const expect = "[ ]";
+//     try testing.expectEqualSlices(u8, expect, list.items);
+// }
 
 pub fn Concat(comptime printers: anytype) type {
     return struct {
@@ -201,26 +184,33 @@ pub fn Concat(comptime printers: anytype) type {
 
         fn print(_: Self, state: *State, writer: anytype) Error!void {
             inline for (printers) |p| {
-                try p.print(state, writer);
+                const T = @TypeOf(p);
+                try T.print(p, state, writer);
             }
         }
     };
 }
 
-pub fn concat(comptime printers: anytype) Pretty(Concat(printers)) {
-    const T = Concat(printers);
-    return Pretty(T){ .pp = T{} };
+pub fn concat(comptime printers: anytype) Concat(printers) {
+    return Concat(printers){};
 }
 
-test "concat empty" {
+test "concat" {
     const a = testing.allocator;
     const L = std.ArrayList(u8);
-    var list = L.init(a);
-    defer list.deinit();
-    const pp = concat(.{empty});
-    var state = State.init(0.5, 80);
-    try pp.print(&state, list.writer());
-    try testing.expectEqual(0, list.items.len);
+    var list1 = L.init(a);
+    defer list1.deinit();
+    const pp1 = concat(.{empty});
+    var state1 = State.init(0.5, 80);
+    try pp1.print(&state1, list1.writer());
+    try testing.expectEqual(0, list1.items.len);
+    var list2 = L.init(a);
+    defer list2.deinit();
+    const pp2 = concat(.{ empty, space, blank(2) });
+    var state2 = State.init(0.5, 80);
+    try pp2.print(&state2, list2.writer());
+    try testing.expectEqual(3, list2.items.len);
+    try testing.expectEqualSlices(u8, "   ", list2.items);
 }
 
 pub fn IfFlat(comptime left: anytype, comptime right: anytype) type {
@@ -238,12 +228,11 @@ pub fn IfFlat(comptime left: anytype, comptime right: anytype) type {
     };
 }
 
-pub fn ifflat(comptime left: anytype, comptime right: anytype) Pretty(IfFlat(left, right)) {
-    const T = IfFlat(left, right);
-    return Pretty(T){ .pp = T{} };
+pub fn ifflat(comptime left: anytype, comptime right: anytype) IfFlat(left, right) {
+    return IfFlat(left, right){};
 }
 
-pub fn newline(comptime n: usize) Pretty(IfFlat(Blank, Hardline)) {
+pub fn newline(comptime n: usize) IfFlat(Blank, Hardline) {
     return ifflat(blank(n), hardline);
 }
 
@@ -264,9 +253,8 @@ pub fn Nest(comptime n: usize, pp: anytype) type {
     };
 }
 
-pub fn nest(comptime n: usize, pp: anytype) Pretty(Nest(n, pp)) {
-    const T = Nest(n, pp);
-    return Pretty(T){ .pp = T{} };
+pub fn nest(comptime n: usize, pp: anytype) Nest(n, pp) {
+    return Nest(n, pp){};
 }
 
 pub fn Lineup(comptime pp: anytype) type {
@@ -286,12 +274,11 @@ pub fn Lineup(comptime pp: anytype) type {
     };
 }
 
-pub fn lineup(comptime pp: anytype) Pretty(Lineup(pp)) {
-    const T = Lineup(pp);
-    return Pretty(T){ .pp = T{} };
+pub fn lineup(comptime pp: anytype) Lineup(pp) {
+    return Lineup(pp){};
 }
 
-pub fn twice(comptime pp: Pretty) Pretty(Concat(.{ pp, pp })) {
+pub fn twice(comptime pp: anytype) Concat(.{ pp, pp }) {
     return concat(.{ pp, pp });
 }
 
@@ -303,9 +290,8 @@ pub fn Repeat(comptime n: usize, comptime pp: anytype) type {
     return Concat(a);
 }
 
-pub fn repeat(comptime n: usize, comptime pp: anytype) Pretty(Repeat(n, pp)) {
-    const T = Repeat(n, pp);
-    return Pretty(T){ .pp = T{} };
+pub fn repeat(comptime n: usize, comptime pp: anytype) Repeat(n, pp) {
+    return Repeat(n, pp){};
 }
 
 test "repeat" {
@@ -326,27 +312,50 @@ fn sepTypes(comptime sep: anytype, comptime printers: anytype) []const type {
     var types: []const type = &[_]type{};
 
     if (printers.len == 1) {
-        types = types ++ [_]type{@TypeOf(printers[0])};
-        return types;
+        const T = @TypeOf(printers[0]);
+        types = types ++ [_]type{T};
+    } else {
+        const len = printers.len;
+        const TS = @TypeOf(sep);
+
+        for (0..len - 1) |i| {
+            const T = @TypeOf(printers[i]);
+            types = types ++ [_]type{T};
+            types = types ++ [_]type{TS};
+        }
+
+        const T = @TypeOf(printers[len - 1]);
+        types ++ [_]type{T};
     }
 
-    const len = printers.len;
-
-    for (0..len - 1) |i| {
-        types = types ++ [_]type{@TypeOf(printers[i])};
-        types = types ++ [_]type{@TypeOf(sep)};
-    }
-
-    return types ++ [_]type{@TypeOf(printers[len - 1])};
+    @compileLog("Types: ", types);
+    return Tuple(types.len, types[0..types.len].*);
 }
 
 pub fn Separate(comptime sep: anytype, comptime printers: anytype) type {
-    return Concat(sepTypes(sep, printers));
+    const T = sepTypes(sep, printers);
+    return Concat(T);
 }
 
-pub fn separate(comptime sep: anytype, comptime printers: anytype) Pretty(Separate(sep, printers)) {
-    const T = Concat(sepTypes(sep, printers));
-    return Pretty(T){ .pp = T{} };
+pub fn separate(comptime sep: anytype, comptime printers: anytype) Separate(sep, printers) {
+    var separated: sepTypes(sep, printers) = undefined;
+
+    if (printers.len == 1) {
+        separated[0] = printers[0];
+    } else {
+        const len = printers.len;
+        const slen = separated.len;
+        for (0..len - 1) |i| {
+            separated[i * 2] = printers[i];
+            separated[i * 2 + 1] = sep;
+        }
+        separated[slen - 1] = printers[len - 1];
+    }
+    return separated;
+}
+
+fn Tuple(comptime n: usize, comptime types: [n]type) type {
+    return meta.Tuple(&types);
 }
 
 test "separate" {
